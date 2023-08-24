@@ -18,10 +18,14 @@
 
     const IMG_PATH = 'cows-and-sheep.jpeg';
     const MODEL = './yolov8n.onnx';
-    const MODEL_INPUT_SIZE_1 = 640
-    const MODEL_INPUT_SIZE_2 = 640
 
-    const IOU_THRESHOLD = 0.9;
+    const YOLO_INPUT_SIZE_1 = 640
+    const YOLO_INPUT_SIZE_2 = 640
+    const YOLO_N_OF_CLASSES = 80;
+    const YOLO_N_OF_BOXES = 8400;
+    const YOLO_DETECTION_THRESHOLD = 0.3;
+
+    const NMS_IOU_THRESHOLD = 0.9;
 
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext("2d");
@@ -66,20 +70,17 @@
         /*
             Parses the output tensor from the YOLO model into bounding boxes for detections
         */
-        let nClasses = 80;
-        let nBoxes = 8400;
-        let threshold = 0.3;
         let boxes = [];
 
-        for (let i=0; i<nBoxes; i++) {
-            xCenter = tensor.data[i] / MODEL_INPUT_SIZE_2 * canvas.width;
-            yCenter = tensor.data[i + nBoxes] / MODEL_INPUT_SIZE_1 * canvas.height;
-            width = tensor.data[i + 2*nBoxes] / MODEL_INPUT_SIZE_2 * canvas.width;
-            height = tensor.data[i + 3*nBoxes] / MODEL_INPUT_SIZE_1 * canvas.height;
-            pClass1 = tensor.data[i + 4*nBoxes];
-            for (let c=0; c<nClasses; c++) {
-                let classProbability = tensor.data[i + (c + 4)*nBoxes];
-                if (classProbability > threshold) {
+        for (let i=0; i<YOLO_N_OF_BOXES; i++) {
+            xCenter = tensor.data[i] / YOLO_INPUT_SIZE_2 * canvas.width;
+            yCenter = tensor.data[i + YOLO_N_OF_BOXES] / YOLO_INPUT_SIZE_1 * canvas.height;
+            width = tensor.data[i + 2*YOLO_N_OF_BOXES] / YOLO_INPUT_SIZE_2 * canvas.width;
+            height = tensor.data[i + 3*YOLO_N_OF_BOXES] / YOLO_INPUT_SIZE_1 * canvas.height;
+            pClass1 = tensor.data[i + 4*YOLO_N_OF_BOXES];
+            for (let c=0; c<YOLO_N_OF_CLASSES; c++) {
+                let classProbability = tensor.data[i + (c + 4)*YOLO_N_OF_BOXES];
+                if (classProbability > YOLO_DETECTION_THRESHOLD) {
                     let box = [xCenter, yCenter, width, height, c, classProbability];
                     boxes.push(box);
                 }
@@ -156,7 +157,7 @@
             let i = 0;
             while (should_include & i < newBoxes.length) {
                 let box2 = newBoxes[i];
-                should_include = iou(box1, box2) < IOU_THRESHOLD;
+                should_include = iou(box1, box2) < NMS_IOU_THRESHOLD;
                 i++
             }
             if (should_include) {
@@ -191,7 +192,7 @@
         img.src = IMG_PATH;
         let testTensor = await ort.Tensor.fromImage(img);
         console.log(testTensor);
-        let imgTensor = await ort.Tensor.fromImage(img, options={resizedWidth: MODEL_INPUT_SIZE_2, resizedHeight:MODEL_INPUT_SIZE_1});
+        let imgTensor = await ort.Tensor.fromImage(img, options={resizedWidth: YOLO_INPUT_SIZE_2, resizedHeight:YOLO_INPUT_SIZE_1});
         */
 
         // 2. html canvas image data
@@ -202,7 +203,7 @@
 
         // 3. Jimp
         const img = await Jimp.read(IMG_PATH);
-        await img.resize(MODEL_INPUT_SIZE_1, MODEL_INPUT_SIZE_2);
+        await img.resize(YOLO_INPUT_SIZE_1, YOLO_INPUT_SIZE_2);
         let imgData = new ImageData(Uint8ClampedArray.from(img.bitmap.data), img.bitmap.width, img.bitmap.height);
         var imgTensor = await ort.Tensor.fromImage(imgData);
         imgTensor = stripTensorAlpha(imgTensor);
@@ -214,8 +215,8 @@
 
         imgNew = imgTensor.toImageData();
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        canvas.height = MODEL_INPUT_SIZE_1;
-        canvas.width = MODEL_INPUT_SIZE_2;
+        canvas.height = YOLO_INPUT_SIZE_1;
+        canvas.width = YOLO_INPUT_SIZE_2;
         ctx.putImageData(imgNew, 0, 0);
         */
 
