@@ -80,7 +80,6 @@
             for (let c=0; c<nClasses; c++) {
                 let classProbability = tensor.data[i + (c + 4)*nBoxes];
                 if (classProbability > threshold) {
-                    console.log(c);
                     let box = [xCenter, yCenter, width, height, c, classProbability];
                     boxes.push(box);
                 }
@@ -143,7 +142,6 @@
 
     function iou(box1, box2) {
         let int = intersection(box1, box2);
-        console.log(int);
         let union = boxSum(box1, box2) - int;
         return int / union
     }
@@ -152,14 +150,11 @@
         let n = boxes.length;
         boxes.sort((a, b) => a[5] - b[5]);
         newBoxes = [boxes.pop()]
-        console.log(boxes, newBoxes);
         while (boxes.length > 0) {
-            console.log(boxes.length);
             let box1 = boxes.pop();
             should_include = true;
             let i = 0;
             while (should_include & i < newBoxes.length) {
-                console.log(i);
                 let box2 = newBoxes[i];
                 should_include = iou(box1, box2) < IOU_THRESHOLD;
                 i++
@@ -229,10 +224,11 @@
         const session = await ort.InferenceSession.create(MODEL);
         let feeds = {images: imgTensor};
         let results = await session.run(feeds);
-        console.log(results.output0)
         let boxes = parseOutputToBoxes(results.output0);
         boxes = nonMaximumSuppression(boxes);
         drawBoxes(boxes);
+
+        console.log('Complete');
     }
 
 </script>
