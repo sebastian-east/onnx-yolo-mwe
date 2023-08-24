@@ -1,0 +1,241 @@
+<html>
+
+<head>
+    <script src='https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js'></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jimp/0.22.10/jimp.min.js"></script>
+</head>
+
+<body>
+    <div style="margin-bottom: 10pt">
+        <button id="button" onclick="buttonClick()">Click to detect.</button>
+    </div>
+    <div>
+        <canvas id="canvas"></canvas>
+    </div>
+</body>
+
+<script>
+
+    const IMG_PATH = 'cows-and-sheep.jpeg';
+    const MODEL = './yolov8n.onnx';
+    const MODEL_INPUT_SIZE_1 = 640
+    const MODEL_INPUT_SIZE_2 = 640
+
+    const IOU_THRESHOLD = 0.9;
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext("2d");
+
+    function init() {
+        /*
+            Add image to canvas when page opens
+        */
+        let img = new Image()
+        img.src = IMG_PATH;
+        img.onload = () => {
+            let w = img.width;
+            let h = img.height;
+            canvas.width = w;
+            canvas.height = h;
+            ctx.drawImage(img, 0, 0, w, h);
+        }
+
+    }
+
+    init();
+
+    function stripTensorAlpha(tensor) {
+        /*
+            Code for removing alpha channel from onnx image tensor
+            I.e. reduces (1, 4, h, w) tensor to (1, 3, h, w)
+        */
+
+        height = tensor.dims[2];
+        width = tensor.dims[3];
+        N = height * width;
+        const [R, G, B] = [[], [], []];
+        for (let i=0; i<N; i++) {
+            R.push(tensor.data[i]);
+            G.push(tensor.data[i + N]);
+            B.push(tensor.data[i + 2*N]);
+        }
+        const data = R.concat(G).concat(B);
+        const newTensor = new ort.Tensor("float32", data, [1, 3, height, width])
+        return newTensor
+    }
+
+    function parseOutputToBoxes(tensor) {
+        /*
+            Parses the output tensor from the YOLO model into bounding boxes for detections
+        */
+        let nClasses = 80;
+        let nBoxes = 8400;
+        let threshold = 0.3;
+        let boxes = [];
+
+        for (let i=0; i<nBoxes; i++) {
+            xCenter = tensor.data[i] / MODEL_INPUT_SIZE_2 * canvas.width;
+            yCenter = tensor.data[i + nBoxes] / MODEL_INPUT_SIZE_1 * canvas.height;
+            width = tensor.data[i + 2*nBoxes] / MODEL_INPUT_SIZE_2 * canvas.width;
+            height = tensor.data[i + 3*nBoxes] / MODEL_INPUT_SIZE_1 * canvas.height;
+            pClass1 = tensor.data[i + 4*nBoxes];
+            for (let c=0; c<nClasses; c++) {
+                let classProbability = tensor.data[i + (c + 4)*nBoxes];
+                if (classProbability > threshold) {
+                    console.log(c);
+                    let box = [xCenter, yCenter, width, height, c, classProbability];
+                    boxes.push(box);
+                }
+            }
+        }
+
+        return boxes
+    }
+
+    function drawBoxes(boxes) {
+        /*
+            Draw bounding boxes onto canvas.
+        */
+        let n = boxes.length;
+        for (let i=0; i<n; i++) {
+            let box = boxes[i];
+            let xCenter = box[0];
+            let yCenter = box[1];
+            let width = box[2];
+            let height = box[3];
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = 'red';
+            ctx.strokeRect(xCenter - width/2, yCenter - height/2, width, height);
+        }
+    }
+
+    /*
+        Non Maximum Suppression Calculation
+    */
+
+    function intersection(box1, box2) {
+        let [xc1, yc1, w1, h1] = box1;
+        let [xc2, yc2, w2, h2] = box2;
+        let xa1 = xc1 - w1/2;
+        let xb1 = xc1 + w1/2;
+        let ya1 = yc1 - h1/2;
+        let yb1 = yc1 + h1/2;
+        let xa2 = xc2 - w2/2;
+        let xb2 = xc2 + w2/2;
+        let ya2 = yc2 - h2/2;
+        let yb2 = yc2 + h2/2;
+        let xa = Math.max(xa1, xa2);
+        let xb = Math.min(xb1, xb2);
+        let ya = Math.max(ya1, ya2);
+        let yb = Math.min(yb1, yb2);
+        let w = xb - xa;
+        let h = yb - ya;
+        if ((w > 0) & (h > 0)) {
+            return w * h
+        } else {
+            return 0
+        }
+    }
+
+    function boxSum(box1, box2) {
+        let [x1, y1, w1, h1] = box1;
+        let [x2, y2, w2, h2] = box2;
+        return w1*h1 + w2*h2
+    }
+
+    function iou(box1, box2) {
+        let int = intersection(box1, box2);
+        console.log(int);
+        let union = boxSum(box1, box2) - int;
+        return int / union
+    }
+
+    function nonMaximumSuppression(boxes) {
+        let n = boxes.length;
+        boxes.sort((a, b) => a[5] - b[5]);
+        newBoxes = [boxes.pop()]
+        console.log(boxes, newBoxes);
+        while (boxes.length > 0) {
+            console.log(boxes.length);
+            let box1 = boxes.pop();
+            should_include = true;
+            let i = 0;
+            while (should_include & i < newBoxes.length) {
+                console.log(i);
+                let box2 = newBoxes[i];
+                should_include = iou(box1, box2) < IOU_THRESHOLD;
+                i++
+            }
+            if (should_include) {
+                newBoxes.push(box1);
+            }
+        }
+        return newBoxes
+    }
+
+    async function buttonClick() {
+
+        /*
+            There appear are (at least) three ways that an onnx tensor can be
+            created for a given image:
+            1 - from a html img source
+                Seems to work fine, but the onnx resize functionality appears
+                to crop the image as opposed to scaling it.
+            2 - from html canvas image data
+                Has an issue in that the image data is the *visible* iamge data,
+                I.e. it includes the scaling that has been applied to the image,
+                and anything that has been drawn on top.
+            3 - using Jimp
+                Works.
+        */
+
+        console.log('Loading image...');
+
+        // 1. html image src
+
+        /*
+        let img = new Image();
+        img.src = IMG_PATH;
+        let testTensor = await ort.Tensor.fromImage(img);
+        console.log(testTensor);
+        let imgTensor = await ort.Tensor.fromImage(img, options={resizedWidth: MODEL_INPUT_SIZE_2, resizedHeight:MODEL_INPUT_SIZE_1});
+        */
+
+        // 2. html canvas image data
+        /*
+        let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let imgTensor = await ort.Tensor.fromImage(imageData);
+        */
+
+        // 3. Jimp
+        const img = await Jimp.read(IMG_PATH);
+        await img.resize(MODEL_INPUT_SIZE_1, MODEL_INPUT_SIZE_2);
+        let imgData = new ImageData(Uint8ClampedArray.from(img.bitmap.data), img.bitmap.width, img.bitmap.height);
+        var imgTensor = await ort.Tensor.fromImage(imgData);
+        imgTensor = stripTensorAlpha(imgTensor);
+
+        /*
+
+        // This is some code for demonstrating converting the imgTensor back to
+        // canvas image data and then painting on the canvas
+
+        imgNew = imgTensor.toImageData();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.height = MODEL_INPUT_SIZE_1;
+        canvas.width = MODEL_INPUT_SIZE_2;
+        ctx.putImageData(imgNew, 0, 0);
+        */
+
+        // Inference and display results
+        console.log('Doing inference...');
+        const session = await ort.InferenceSession.create(MODEL);
+        let feeds = {images: imgTensor};
+        let results = await session.run(feeds);
+        console.log(results.output0)
+        let boxes = parseOutputToBoxes(results.output0);
+        boxes = nonMaximumSuppression(boxes);
+        drawBoxes(boxes);
+    }
+
+</script>
+</html>
