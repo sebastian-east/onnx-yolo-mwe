@@ -5,7 +5,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jimp/0.22.10/jimp.min.js"></script>
 </head>
 
-<body>
+<body onload="init()">
     <div style="margin-bottom: 10pt">
         <button id="button" onclick="buttonClick()">Click to detect.</button>
     </div>
@@ -41,8 +41,6 @@
         }
 
     }
-
-    init();
 
     function stripTensorAlpha(tensor) {
         /*
